@@ -1,0 +1,673 @@
+	<!doctype html>
+<html lang="en">
+<head>
+	<title>Text 3D (Three.js)</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel=stylesheet href="css/base.css"/>
+</head>
+<body>
+
+<script src="js/Three.js"></script>
+<script src="js/Detector.js"></script>
+<script src="js/Stats.js"></script>
+<script src="js/OrbitControls.js"></script>
+<script src="js/KeyboardState.js"></script>
+<script src="js/THREEx.FullScreen.js"></script>
+<script src="js/THREEx.WindowResize.js"></script>
+<script src="js/Tween.js"></script>
+<script type='text/javascript' src='js/DAT.GUI.min.js'></script>
+
+<!-- load fonts -->
+<script src="fonts/gentilis_bold.typeface.js"></script>
+<script src="fonts/gentilis_regular.typeface.js"></script>
+<script src="fonts/optimer_bold.typeface.js"></script>
+<script src="fonts/optimer_regular.typeface.js"></script>
+<script src="fonts/helvetiker_bold.typeface.js"></script>
+<script src="fonts/helvetiker_regular.typeface.js"></script>
+<script src="fonts/droid_sans_regular.typeface.js"></script>
+<script src="fonts/droid_sans_bold.typeface.js"></script>
+<script src="fonts/droid_serif_regular.typeface.js"></script>
+<script src="fonts/droid_serif_bold.typeface.js"></script>
+
+<!-- Note the additional JS files! always need all of these for postprocessing. -->
+<script src="js/postprocessing/EffectComposer.js"></script>
+<script src="js/postprocessing/RenderPass.js"></script>
+<script src="js/postprocessing/ShaderPass.js"></script>
+<script src="js/postprocessing/MaskPass.js"></script>
+<script src="js/postprocessing/SavePass.js"></script>
+<script src="js/shaders/CopyShader.js"></script>
+
+<!-- separate out the shaders specific to this demo -->
+<script src="js/shaders/SepiaShader.js"></script>
+<script src="js/shaders/BlendShader.js"></script>
+
+<!-- jQuery -->
+<script src="js/jquery-1.9.1.js"></script>
+
+<!-- ------------------------------------------------------------ -->
+<video id="monitor" autoplay width="160" height="120" style="visibility: hidden; float:left;"></video>
+<canvas id="videoImage" width="160" height="120" style="visibility: hidden; float:left;"></canvas>
+
+
+<p id="errorMessage"></p>
+<canvas id="videoCanvas" width="320" height="240" style="z-index: 1; position: absolute; left:0px; top:0px;"></canvas>
+
+<canvas id="layer2"     width="320" height="240" style="z-index: 2; position: absolute; left:0px; top:0px; opacity:0.5;"></canvas>
+</div>
+<canvas id="blendCanvas" style="display: none; position: relative; left: 320px; top: 240px; width: 320px; height: 240px;"></canvas>
+<div id="messageError"></div>
+
+<!-- global variables -->
+<script src="js/Globals.js"></script>
+
+<!-- GUI -->
+<script type='text/javascript' src='js/GUI_9.js'></script>
+
+
+<script>
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+window.URL = window.URL || window.webkitURL;
+
+var camvideo = document.getElementById('monitor');
+
+	if (!navigator.getUserMedia) 
+	{
+		document.getElementById('errorMessage').innerHTML = 
+			'Sorry. <code>navigator.getUserMedia()</code> is not available.';
+	} else {
+		navigator.getUserMedia({video: true}, gotStream, noStream);
+	}
+
+function gotStream(stream) 
+{
+	if (window.URL) 
+	{   camvideo.src = window.URL.createObjectURL(stream);   } 
+	else // Opera
+	{   camvideo.src = stream;   }
+
+	camvideo.onerror = function(e) 
+	{   stream.stop();   };
+
+	stream.onended = noStream;
+}
+
+function noStream(e) 
+{
+	var msg = 'No camera available.';
+	if (e.code == 1) 
+	{   msg = 'User denied access to use camera.';   }
+	document.getElementById('errorMessage').textContent = msg;
+}
+</script>
+
+<div id="ThreeJS" style="position: absolute; left:0px; top:0px"></div>
+<script>
+/*
+	Author: Chen Khen Price for Omer Golan. 
+	chenprice.music@gmail.com
+	With much help from Lee Stemkoski's examples.
+*/
+
+// holds words used for tunnel
+var tunnelWords = {
+    tokens: [],
+    add: function (str, physobj) {
+    	var newObj = [str, physobj];
+        this.tokens.splice(0, 0, newObj);
+        if (this.tokens.length == MAX_TUNNEL_OBJECTS){
+        	scene.remove(this.tokens[MAX_TUNNEL_OBJECTS-1][1]);
+        	this.tokens.pop();
+        }
+    },
+    remove: function(idx){
+    	delete this.tokens[idx];
+    },
+    get: function(idx){
+    	return this.tokens[idx];
+    },
+};
+
+// holds words used for floating sentences
+var floatingWords = {
+    tokens: [],
+    movestepSize: 3,
+    add: function (str, physobj, newmovement) {
+    	// word, mesh, move array, move array idx, life
+    	var newObj = [str, physobj, newmovement, 0, 0];
+        this.tokens.splice(0, 0, newObj);
+		scene.add(physobj);
+    },
+    remove: function(idx){
+    	delete this.tokens[idx];
+    },
+    get: function(idx){
+    	return this.tokens[idx];
+    },
+    move: function(){
+    	toRemove = [];
+    	for (i = 0; i < 5; i++){
+	    	for (t in this.tokens){
+	    		// keep tabs of object life
+	    		this.tokens[t][4]++;
+	    		if (this.tokens[t][4] == FLOATING_WORDS_LIFE){
+	    			toRemove.push(t);
+	    		}
+
+		    	currObj = this.tokens[t][1];
+		    	currMovArr = this.tokens[t][2];
+		    	currMovIdx = this.tokens[t][3];
+
+		    	if (currObj != null){
+			    	switch(currMovArr[currMovIdx % currMovArr.length]){
+			    		case 1: 
+			    			if (currObj.position.y < UPLIMIT){
+								currObj.position.y += this.movestepSize;
+							}
+			    			break;
+			    		case 2: 
+			    			if (currObj.position.y > DOWNLIMIT){
+								currObj.position.y -= this.movestepSize;
+							}
+			    			break;
+			    		case 3: 
+			    			if (currObj.position.x < RIGHTLIMIT){
+								currObj.position.x += this.movestepSize;
+							}
+			    			break;
+			    		case 4: 
+			    			if (currObj.position.x > LEFTLIMIT){
+								currObj.position.x -= this.movestepSize;
+							}
+			    			break;
+			    		default:
+			    			break;
+			    	}
+			    	this.tokens[t][3]++;
+			    }
+			}
+		}
+		// remove 'dead' objects
+		if (toRemove.length > 0){
+			for (t in toRemove){
+				scene.remove(this.tokens[ toRemove[t] ][1]);
+				this.tokens.splice(toRemove[t],1);
+			}
+		}
+    }
+};
+
+// GET BOOK
+getBook("Age of Context_ Mobile, Sensors, Data and  - Robert Scoble Shel Israel.txt");
+
+init();
+animate();
+
+// FUNCTIONS 		
+function init() 
+{
+	// SCENE
+	scene = new THREE.Scene();
+
+	// CAMERA
+	var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+	var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 20000;
+	camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
+	scene.add(camera);
+	camera.position.set(160,220,3000);
+	camera.lookAt(scene.position);	
+
+	// RENDERER
+	if ( Detector.webgl )
+		renderer = new THREE.WebGLRenderer( {antialias:true} );
+	else
+		renderer = new THREE.CanvasRenderer(); 
+
+	renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+	container = document.getElementById( 'ThreeJS' );
+	container.appendChild( renderer.domElement );
+
+	// EVENTS
+	THREEx.WindowResize(renderer, camera);
+	THREEx.FullScreen.bindKey({ charCode : 'm'.charCodeAt(0) });
+
+	// CONTROLS
+	controls = new THREE.OrbitControls( camera, renderer.domElement );
+
+	// STATS
+	stats = new Stats();
+	stats.domElement.style.position = 'absolute';
+	stats.domElement.style.bottom = '0px';
+	stats.domElement.style.zIndex = 100;
+	container.appendChild( stats.domElement );
+
+	// LIGHT
+	initLights();
+	
+	// FOG
+	scene.fog = new THREE.FogExp2( fgColor, fgDensity);
+	
+	// GUI
+	initGui();
+
+	// REFLECTION
+	videoTexture = new THREE.Texture( videoCanvas );
+	videoTexture.minFilter = THREE.LinearFilter;
+	videoTexture.magFilter = THREE.LinearFilter;
+	
+	var mirrorSphereMaterial = new THREE.MeshBasicMaterial( { map: videoTexture, overdraw: true, side:THREE.DoubleSide } );
+
+	var sphereGeom =  new THREE.SphereGeometry( SPHERE_RADIUS, 100, 100 ); // radius, segmentsWidth, segmentsHeight
+	
+	mirrorSphere = new THREE.Mesh( sphereGeom, mirrorSphereMaterial );
+	mirrorSphere.position.set(SPHERE_X, SPHERE_Y, SPHERE_Z);
+	mirrorSphere.rotation.y = - Math.PI / 3;
+	scene.add(mirrorSphere);
+	
+	// SKYBOX
+	//var skyBoxGeometry = new THREE.CubeGeometry( 15000, 15000, 15000 );
+	var skyBoxGeometry = new THREE.SphereGeometry( 10000, 100, 100 );
+	// var skyBoxMaterial = new THREE.MeshLambertMaterial( { color: 0xffffdd, side: THREE.BackSide } );
+	var skyBoxMaterial = new THREE.MeshBasicMaterial( { map: videoTexture, overdraw: true, side:THREE.DoubleSide } );
+	skyBox = new THREE.Mesh( skyBoxGeometry, skyBoxMaterial );
+	skyBox.doubleSided = true;
+	scene.add(skyBox);
+	
+	/////////////////////
+	// POST-PROCESSING //
+	/////////////////////
+	
+	// first, create the composer, which will combine the shader effects
+	composer = new THREE.EffectComposer( renderer );
+	
+	// the first step is to render the scene
+	//  (so the special effects can have a base image to affect)
+	composer.addPass( new THREE.RenderPass( scene, camera ) );
+
+	//setup and add (another) effect to the composer
+	var shaderSepia = THREE.SepiaShader;
+	effectSepia = new THREE.ShaderPass( shaderSepia );
+	
+	// supply values to shader variables if needed
+	effectSepia.uniforms[ "amount" ].value = sapiaShaderLevel;
+	
+	//renderer.autoClear = false;
+	var renderTargetParameters = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBFormat, stencilBuffer: false };
+	var width = window.innerWidth, height = window.innerHeight;
+	renderTarget = new THREE.WebGLRenderTarget( width, height, renderTargetParameters  ); //, 
+
+	effectSave = new THREE.SavePass( new THREE.WebGLRenderTarget( width, height, renderTargetParameters ) ); //, renderTargetParameters
+
+	effectBlend = new THREE.ShaderPass( THREE.BlendShader, "tDiffuse1" );
+
+	effectBlend.uniforms[ 'tDiffuse2' ].value = effectSave.renderTarget;
+	effectBlend.uniforms[ 'mixRatio' ].value = blurShaderLevel;
+
+	composer.addPass( effectBlend );
+	composer.addPass( effectSave );
+	
+	effectSepia.renderToScreen = true;
+	composer.addPass(effectSepia);
+	renderer.clear();	
+
+	// random floating words rate, on/off at set interval
+	randomizeFloatingWords(5000);
+	randomizeCam(camUpdate(), 1000);
+}
+
+// Scene light definitions
+function initLights(){
+	// var light = new THREE.PointLight(0xffffff, 0.05);
+	// light.position.set(0,250,3000);
+	// scene.add(light);
+
+	pointLight2 = new THREE.DirectionalLight( 0x0000ff, 0.5);
+	pointLight2.position.set(0,1,0);
+	scene.add( pointLight2 );
+
+	var light = new THREE.PointLight(0xffffff);
+	light.position.set(0,250,0);
+	//scene.add(light);
+
+	// pointLight1 = new THREE.PointLight( 0xf1f1f1);
+	// pointLight1.position.set( 0, 550, 0 );
+	// scene.add( pointLight1 );
+}
+
+// gets the book file used for text objects 
+function getBook(filename){
+	$.ajax({
+	          url: 'http://localhost:8000/books/'+filename,
+	          success: function(response){
+	            var text = response;
+	            loadWords(text);
+	          }
+	        })  
+}
+
+// loads sentences from the book into memory
+function loadWords(text)
+{
+	book = text.split("\n");
+	addTunnelText(book[bookidx++], scene);
+	newBook = [];
+	for (b in book){
+		if (book[b].length > 0 && book[b].search("[A-Za-z0-9?']") >= 0)
+			var sentence = limitStr(book[b], 8);
+			newBook.push(sentence);
+	}
+	book = newBook;
+}
+
+// Three.js animate function
+function animate() 
+{
+	requestAnimationFrame( animate );
+	render();
+	TWEEN.update();
+	update();
+	blend();	
+	checkAreas();
+}
+
+// Modified Three.js update function
+function update()
+{	
+	bookidx = bookidx % book.length;
+
+	// FLOATING TEXT
+	if (stepsFloating++ % floatingWordsRate == 0 && makeFloatingWords){
+		addFloatingText(book[bookidx], scene);
+	}
+	else{
+		floatingWords.move();
+	}
+
+	// TUNNEL TEXT
+	// move sentences forward
+	for (t in tunnelWords.tokens){
+		tunnelWords.tokens[t][1].position.z += 120;
+	}
+	
+	// get another sentence
+	if (tunnelWords.tokens[0][1].position.z > -2000){
+		addTunnelText(book[bookidx++], scene);	
+	}
+
+	// CAMERA
+	//camUpdate();
+
+	// KEYBOARD
+	keyboardUpdate();
+
+	// CONTROLS AND STATS
+	controls.update();
+	stats.update();
+}
+
+// generate random values for floating words attributes
+function randomizeFloatingWords(interval){
+	setInterval(function(){
+		floatingWordsRate = Math.floor(Math.random() * 300 + 4); 
+		Math.random() > 0.2 ? makeFloatingWords = true : makeFloatingWords = false;
+		FLOATING_WORDS_LIFE = Math.floor(Math.random() * (MAX_FLOATING_WORDS_LIFE - MIN_FLOATING_WORDS_LIFE) 
+							+ MIN_FLOATING_WORDS_LIFE);
+	}, interval);
+}
+
+function randomizeCam(callback, wait)
+{
+	var internalCallback = function()
+	{
+		return function()
+		{
+		   	camUpdate();
+		    window.setTimeout( internalCallback, Math.floor(Math.random() * (camMoveFreq-60) + 60) );
+		}
+	}();
+	window.setTimeout( internalCallback, wait);
+}
+
+// moves camera in random directions
+function camUpdate(){
+	
+	//console.log(finishedTween, stepsCam, camMovementTimer);
+	if (finishedTween){
+		if (stepsCam > 10000)
+			stepsCam = 0;
+		direction = Math.floor(Math.random() * 39);
+		movetime = Math.floor(Math.random() * (camMoveTime-200) + 200);
+		camMovementTimer = Math.floor(Math.random() * (camMoveFreq-60) + 60);
+
+		switch(directionArr[direction]){
+			case 1:
+				moveCamera({x: Math.random() * 420 - 220, y: camera.position.y, z: camera.position.z}, movetime);
+				break;
+			case 2:
+				moveCamera({x: camera.position.x, y: Math.random() * 435 + 20, z: camera.position.z}, movetime);
+				break;
+			case 3:
+				moveCamera({x: camera.position.x, y: camera.position.y, z: Math.random() * camBackMax + 1800}, movetime);
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+// keyboard controls
+function keyboardUpdate(){
+	keyboard.update();
+	if ( keyboard.down("S") ) {
+		if (statsVisible){
+			stats.domElement.style.visibility = 'hidden';
+			statsVisible = false;
+		}
+		else{
+			stats.domElement.style.visibility = 'visible';
+			statsVisible = true;
+		}
+	}
+}
+
+// smooth camera movements
+function moveCamera(newLocation, movetime){
+	finishedTween = false;
+
+	var easing	= TWEEN.Easing.Cubic.Out;
+	current = camera.position;
+	TWEEN.removeAll();
+	var tweenHead = new TWEEN.Tween(current)
+		.to(newLocation, movetime)
+		.easing(easing)
+		.onUpdate(update);
+	
+	tweenHead.onComplete(function(){ finishedTween = true;});
+
+	// start the first
+	tweenHead.start();
+}
+
+// Modified Three.js render function
+function render() 
+{
+	if ( video.readyState === video.HAVE_ENOUGH_DATA ) 
+	{
+		// mirror video
+		videoContext.drawImage( video, 0, 0, videoCanvas.width, videoCanvas.height );
+
+		if ( videoTexture ) 
+			videoTexture.needsUpdate = true;
+
+		for ( var i = 0; i < buttons.length; i++ )
+			layer2Context.drawImage( buttons[i].image, buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h );		
+	}
+	
+	renderer.clear();
+	composer.render( 0.1 );
+}
+
+// adds sentences to tunnel
+function addTunnelText(word, scene){
+	textMesh = makeTextMeshForTunnel(word);
+	tunnelWords.add(word, textMesh);
+	scene.add(textMesh);
+}
+
+// mesh generator for tunnel text
+function makeTextMeshForTunnel(word){
+	var textGeom = new THREE.TextGeometry( word , 
+	{
+		size: 22, height: 1, curveSegments: 1,
+		font: "helvetiker", weight: "normal", style: "normal",
+		bevelThickness: 900, bevelSize: 2, bevelEnabled: true,
+		material: 1, extrudeMaterial: 0
+	});
+
+	// font: helvetiker, gentilis, droid sans, droid serif, optimer
+	// weight: normal, bold
+	
+	var textMesh = new THREE.Mesh(textGeom, tunnel_textMaterial );
+	textGeom.computeBoundingBox();
+	var textWidth = textGeom.boundingBox.max.x - textGeom.boundingBox.min.x;
+	
+	textMesh.position.set( -0.5 * textWidth, 0, -3000 );
+	textMesh.rotation.x = TUNNEL_TEXT_X_ROTATION;
+	return textMesh;
+}
+
+// add floating word element
+function addFloatingText(word, scene){
+	word = limitStr(word, Math.floor(Math.random()*6+1));
+	//console.log("["+word+"]");
+	textMesh = makeTextMeshForFloating(word);
+	floatingWords.add(word, textMesh, getMovement());
+	scene.add(textMesh);
+}
+
+// mesh generator for floating sentences
+function makeTextMeshForFloating(word){
+	var newObjSize = Math.random() * (MAX_FONT_SIZE - MIN_FONT_SIZE) + MIN_FONT_SIZE;
+	var textGeom = new THREE.TextGeometry( word , 
+	{
+		size: newObjSize, height: 1, curveSegments: 1,
+		font: "droid serif", weight: "bold", style: "normal",
+		bevelThickness: 14, bevelSize: 3, bevelEnabled: false,
+		material: 2, extrudeMaterial: 2
+	});
+	// font: helvetiker, gentilis, droid sans, droid serif, optimer
+	// weight: normal, bold
+	
+	var textMaterial = new THREE.MeshFaceMaterial(floating_materialArray);
+	var textMesh = new THREE.Mesh(textGeom, textMaterial );
+	
+	textGeom.computeBoundingBox();
+	var textWidth = textGeom.boundingBox.max.x - textGeom.boundingBox.min.x;
+	
+	textMesh.position.set( -0.5 * textWidth, -20, 800 );
+	textMesh.rotation.x = 2 * Math.PI;
+	return textMesh;
+}
+
+// limit a string containing a sentence to 'len' number of words
+function limitStr(sentence, len){
+	var sentenceAsArray = sentence.split(" ");
+	var s = 0;
+	var newSentence = "";
+
+	while (s <= len && s < sentenceAsArray.length){
+		newSentence += sentenceAsArray[s]+" ";
+		s++;
+	}
+	return newSentence;
+}
+
+// get movement sequence for floating letters
+function getMovement(){
+	return movementArr[Math.floor(Math.random()*movementArr.length)];
+}
+
+//////////////////////
+// Motion Detection //
+//////////////////////
+var lastImageData;
+function blend() 
+{
+	var width  = videoCanvas.width;
+	var height = videoCanvas.height;
+	// get current webcam image data
+	var sourceData = videoContext.getImageData(0, 0, width, height);
+	// create an image if the previous image doesn’t exist
+	if (!lastImageData) lastImageData = videoContext.getImageData(0, 0, width, height);
+	// create a ImageData instance to receive the blended result
+	var blendedData = videoContext.createImageData(width, height);
+	// blend the 2 images
+	differenceAccuracy(blendedData.data, sourceData.data, lastImageData.data);
+	// draw the result in a canvas
+	blendContext.putImageData(blendedData, 0, 0);
+	// store the current webcam image
+	lastImageData = sourceData;
+}
+
+function differenceAccuracy(target, data1, data2) 
+{
+	if (data1.length != data2.length) return null;
+	var i = 0;
+	while (i < (data1.length * 0.25)) 
+	{
+		var average1 = (data1[4*i] + data1[4*i+1] + data1[4*i+2]) / 3;
+		var average2 = (data2[4*i] + data2[4*i+1] + data2[4*i+2]) / 3;
+		var diff = threshold(fastAbs(average1 - average2));
+		target[4*i]   = diff;
+		target[4*i+1] = diff;
+		target[4*i+2] = diff;
+		target[4*i+3] = 0xFF;
+		++i;
+	}
+}
+function fastAbs(value) 
+{
+	return (value ^ (value >> 31)) - (value >> 31);
+}
+function threshold(value) 
+{
+	return (value > 0x15) ? 0xFF : 0;
+}
+
+// check if white region from blend overlaps area of interest (e.g. triggers)
+function checkAreas() 
+{
+	for (var b = 0; b < buttons.length; b++)
+	{
+		// get the pixels in a note area from the blended image
+		var blendedData = blendContext.getImageData( buttons[b].x, buttons[b].y, buttons[b].w, buttons[b].h );
+			
+		// calculate the average lightness of the blended data
+		var i = 0;
+		var sum = 0;
+		var countPixels = blendedData.data.length * 0.25;
+		while (i < countPixels) 
+		{
+			sum += (blendedData.data[i*4] + blendedData.data[i*4+1] + blendedData.data[i*4+2]);
+			++i;
+		}
+		// calculate an average between of the color values of the note area [0-255]
+		var average = Math.round(sum / (3 * countPixels));
+		if (average > 50 && finishedTween) // more than 20% movement detected
+		{
+			if (buttons[b].name  == "red"){
+				moveCamera({x: -480, y: camera.position.y, z: camera.position.z}, 1000);
+			}
+			if(buttons[b].name == "green"){
+				moveCamera({x: 0, y: Math.random() * 435 + 20, z: camera.position.z}, 1000);
+			}
+			if(buttons[b].name == "blue"){
+				moveCamera({x: 480, y: camera.position.y, z: camera.position.z}, 1000);
+			}
+		}
+	}
+}
+</script>
+
+</body>
+</html>
