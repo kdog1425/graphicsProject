@@ -337,7 +337,7 @@ function initLights(){
 // gets the book file used for text objects 
 function getBook(filename){
 	$.ajax({
-	          url: 'http://localhost:8000/books/'+filename,
+	          url: '/books/'+filename,
 	          success: function(response){
 	            var text = response;
 	            loadWords(text);
